@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teacher</title>
+    <style>
+        video
+        {
+            display: block;
+            margin-bottom: 20px;
+        }
+
+        #menu
+        {
+            position: relative;       
+        }
+        #menu>div
+        {
+            position: absolute;
+            left: 50vw;
+            top: 50vh;
+            transform: translate(-50%, -50%);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="menu" style="display: none;">
+        <div>
+            <button onclick="start(true)">screen</button>
+            <button onclick="start(false)">camera</button>
+        </div>
+    </div>
+
+    <script>
+
+
+        var stream;
+
+        peerConnections = [];
+
+        var peerConnection;
+
+        var ws = new WebSocket("ws://"+location.host+"/teacher")
+
+        
+
+
+        ws.onopen = async function()
+        {
+            document.querySelector("#menu").style.display = "block";                
+        }
+
+
+        ws.onmessage = async e =>
+        {
+            console.log(e) 
+           var message = JSON.parse(e.data);
+
+           if(!message) return;
+
+            if(message.type)
+            {
+                if(message.type === "answer")
+                {
+                    peerConnection.setRemoteDescription(new RTCSessionDescription(message));
+                }
+                if(message.type == "offer")
+                {
+                    // stream.getTracks().forEach(t=>peerConnection.addTrack(t))
+                    peerConnection.setRemoteDescription(new RTCSessionDescription(message))
+                    let answer = await peerConnection.createAnswer();              
+                    await peerConnection.setLocalDescription(answer);
+                    ws.send(JSON.stringify(answer));
+                } 
+            }
+
+            if(message.candidate)
+            {
+               peerConnection.addIceCandidate(message);
+            } 
+        }
+
+
+         function initPeerConnection(connection)
+        {
+            var video = document.createElement("video");
+
+            connection.ontrack = e =>
+            {
+                let remoteStream = new MediaStream([e.track]);                  
+                video.srcObject = remoteStream;
+                video.width = 480;
+                document.body.appendChild(video);
+                video.play();        
+            }
+            
+            connection.onicecandidate = e =>
+            {
+                ws.send(JSON.stringify(e.candidate))                  
+            }
+
+            connection.oniceconnectionstatechange = e =>
+            {
+                if(connection.iceConnectionState === "connected")
+                {
+                   
+                    peerConnections.push(connection);
+
+                    peerConnection = new RTCPeerConnection();
+                    initPeerConnection(peerConnection)
+                }
+                if(connection.iceConnectionState === "disconnected")
+                {
+                    peerConnections = peerConnections.filter(c=> c!==connection);
+                    video.parentNode?.removeChild(video);
+                }
+            }
+
+            stream.getTracks().forEach(t=>peerConnection.addTrack(t))
+            //peerConnection.addTransceiver(stream.getTracks()[0],{"direction":"sendonly"});
+
+        }
+
+
+        async function start(screenCapture)
+        {
+            document.querySelector("#menu").style.display = "none";
+            if(screenCapture)
+            {
+                stream = await navigator.mediaDevices.getUserMedia({video: {mediaSource: "screen"}})
+            }
+            else
+            {
+                stream = await navigator.mediaDevices.getUserMedia({video: true})
+            }
+            
+           
+            peerConnection = new RTCPeerConnection();
+
+            await initPeerConnection(peerConnection)
+
+            
+            var offer = await peerConnection.createOffer();
+      
+           await peerConnection.setLocalDescription(offer);
+
+           ws.send(JSON.stringify(offer));  
+
+                
+        
+        }
+        
+    </script>
+</body>
+</html>
